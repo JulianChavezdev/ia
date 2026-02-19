@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `Analiza esta imagen de factura o albarán. 
     Extrae los datos y clasifica. Devuelve ÚNICAMENTE un objeto JSON puro, sin bloques de código markdown, con esta estructura exacta:
