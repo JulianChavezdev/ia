@@ -1,23 +1,34 @@
 "use client";
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
-import { Upload, Loader2, Receipt, FileText, Trash2, Download } from "lucide-react";
+import { Upload, Loader2, Receipt, FileText, Trash2, AlertTriangle } from "lucide-react";
 
 export default function App() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null); // Nuevo estado
 
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     setLoading(true);
+    setErrorMessage(null); // Limpiar errores previos
+
     for (const file of Array.from(e.target.files)) {
       const fd = new FormData();
       fd.append("file", file);
       try {
         const res = await fetch("/api/process", { method: "POST", body: fd });
         const data = await res.json();
-        if (!data.error) setItems(prev => [...prev, data]);
-      } catch (err) { console.error(err); }
+        
+        if (res.status === 429 || data.error) {
+          setErrorMessage(data.error || "Error al procesar el archivo");
+          break; // Parar si hay error de cuota
+        }
+        
+        setItems(prev => [...prev, data]);
+      } catch (err) { 
+        setErrorMessage("Error de conexión con el servidor");
+      }
     }
     setLoading(false);
   };
@@ -38,48 +49,50 @@ export default function App() {
         <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Scanner Pro IA</h1>
-            <p className="text-slate-500">Extracción con Gemini 2.0 Flash</p>
+            <p className="text-slate-500">Procesando con Gemini 1.5 Flash</p>
           </div>
           
           <div className="flex gap-2">
-            <button onClick={() => exportExcel("Factura")} className="flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
+            <button onClick={() => exportExcel("Factura")} className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2">
               <Receipt size={18}/> Excel Facturas
             </button>
-            <button onClick={() => exportExcel("Albarán")} className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
+            <button onClick={() => exportExcel("Albarán")} className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2">
               <FileText size={18}/> Excel Albaranes
             </button>
-            <button onClick={() => setItems([])} className="p-2 text-red-500 hover:bg-red-50 rounded-lg border border-red-100 transition"><Trash2 size={20}/></button>
+            <button onClick={() => setItems([])} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={20}/></button>
           </div>
         </div>
 
-        {/* Zona Dropzone */}
-        <label className="group relative mb-8 flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-slate-300 rounded-2xl cursor-pointer bg-white hover:bg-yellow-50 hover:border-yellow-400 transition-all">
+        {/* Mensaje de Error si ocurre el 429 */}
+        {errorMessage && (
+          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 flex items-center gap-3 rounded shadow-sm">
+            <AlertTriangle className="flex-shrink-0" />
+            <p className="font-medium">{errorMessage}</p>
+          </div>
+        )}
+
+        <label className="mb-8 flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-300 rounded-2xl cursor-pointer bg-white hover:bg-yellow-50 transition-all">
           <div className="flex flex-col items-center justify-center">
-            {loading ? (
-              <Loader2 className="h-10 w-10 text-yellow-500 animate-spin" />
-            ) : (
-              <Upload className="h-10 w-10 text-slate-400 group-hover:text-yellow-500 transition-colors" />
-            )}
+            {loading ? <Loader2 className="h-10 w-10 text-yellow-500 animate-spin" /> : <Upload className="h-10 w-10 text-slate-400" />}
             <p className="mt-2 text-sm text-slate-600 font-medium">
-              {loading ? "La IA está trabajando..." : "Arrastra tus facturas aquí o haz clic"}
+              {loading ? "Procesando..." : "Sube imágenes de facturas"}
             </p>
           </div>
           <input type="file" className="hidden" multiple accept="image/*" onChange={onUpload} disabled={loading} />
         </label>
 
-        {/* Tabla Excel Style */}
-        <div className="bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
-              <thead>
-                <tr className="bg-[#FFD700] text-slate-900 uppercase font-black text-[11px] tracking-wider border-b-2 border-slate-300">
+              <thead className="bg-[#FFD700] text-slate-900 uppercase font-bold border-b-2 border-slate-300">
+                <tr>
                   <th className="px-4 py-4 border-r border-slate-300">Tipo</th>
                   <th className="px-4 py-4 border-r border-slate-300">Empresa</th>
                   <th className="px-4 py-4 border-r border-slate-300">Fecha</th>
                   <th className="px-4 py-4 border-r border-slate-300">Nº Doc</th>
                   <th className="px-4 py-4 border-r border-slate-300 text-right">Importe</th>
-                  <th className="px-4 py-4 border-r border-slate-300 text-right">IVA 21%</th>
-                  <th className="px-4 py-4 border-r border-slate-300 text-right">IRPF 19%</th>
+                  <th className="px-4 py-4 border-r border-slate-300 text-right font-black">IVA 21%</th>
+                  <th className="px-4 py-4 border-r border-slate-300 text-right font-black text-red-600">IRPF 19%</th>
                   <th className="px-4 py-4 border-r border-slate-300">Ciudad</th>
                   <th className="px-4 py-4 border-r border-slate-300">Tienda</th>
                   <th className="px-4 py-4">Descripción</th>
@@ -87,23 +100,19 @@ export default function App() {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {items.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="px-4 py-20 text-center text-slate-400 italic bg-slate-50/50">
-                      Esperando documentos para procesar...
-                    </td>
-                  </tr>
+                  <tr><td colSpan={10} className="px-4 py-20 text-center text-slate-400 italic">Sube una imagen para empezar...</td></tr>
                 ) : (
                   items.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-yellow-50/50 transition-colors font-medium">
-                      <td className="px-4 py-3 border-r border-slate-100 italic text-slate-500 text-xs uppercase">{item.tipo}</td>
-                      <td className="px-4 py-3 border-r border-slate-100 text-slate-900">{item.empresa}</td>
-                      <td className="px-4 py-3 border-r border-slate-100">{item.fecha}</td>
-                      <td className="px-4 py-3 border-r border-slate-100 font-mono text-xs">{item.numFactura}</td>
-                      <td className="px-4 py-3 border-r border-slate-100 text-right font-bold text-slate-900">{item.importe?.toFixed(2)}€</td>
-                      <td className="px-4 py-3 border-r border-slate-100 text-right text-blue-600">{(item.iva21 || 0).toFixed(2)}€</td>
-                      <td className="px-4 py-3 border-r border-slate-100 text-right text-red-600">{(item.irpf19 || 0).toFixed(2)}€</td>
-                      <td className="px-4 py-3 border-r border-slate-100">{item.ciudad}</td>
-                      <td className="px-4 py-3 border-r border-slate-100">{item.tienda}</td>
+                    <tr key={idx} className="hover:bg-yellow-50 transition-colors">
+                      <td className="px-4 py-3 border-r font-bold text-xs uppercase text-slate-500">{item.tipo}</td>
+                      <td className="px-4 py-3 border-r font-semibold">{item.empresa}</td>
+                      <td className="px-4 py-3 border-r">{item.fecha}</td>
+                      <td className="px-4 py-3 border-r font-mono text-xs">{item.numFactura}</td>
+                      <td className="px-4 py-3 border-r text-right font-bold">{item.importe?.toFixed(2)}€</td>
+                      <td className="px-4 py-3 border-r text-right text-blue-600">{(item.iva21 || 0).toFixed(2)}€</td>
+                      <td className="px-4 py-3 border-r text-right text-red-600">{(item.irpf19 || 0).toFixed(2)}€</td>
+                      <td className="px-4 py-3 border-r">{item.ciudad}</td>
+                      <td className="px-4 py-3 border-r">{item.tienda}</td>
                       <td className="px-4 py-3 truncate max-w-[200px] text-slate-500">{item.descripcion}</td>
                     </tr>
                   ))

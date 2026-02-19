@@ -12,24 +12,23 @@ export async function POST(req: Request) {
     const buffer = await file.arrayBuffer();
     const base64Data = Buffer.from(buffer).toString("base64");
 
-    // PROMPT OPTIMIZADO PARA GEMINI 2.0 FLASH
-    const prompt = `Analiza detalladamente esta imagen. Clasifica como 'Factura' o 'Albarán'.
-    Extrae los datos y responde ÚNICAMENTE con un JSON puro con este formato:
+    const prompt = `Analiza la imagen. Extrae datos y clasifica como 'Factura' o 'Albarán'.
+    Responde ÚNICAMENTE con un JSON puro:
     {
       "tipo": "Factura",
-      "empresa": "Nombre legal",
+      "empresa": "Nombre",
       "fecha": "DD/MM/YYYY",
-      "numFactura": "Número de documento",
-      "importe": 0.00,
-      "iva21": 0.00,
-      "irpf19": 0.00,
+      "numFactura": "Número",
+      "importe": 0.0,
+      "iva21": 0.0,
+      "irpf19": 0.0,
       "ciudad": "Ciudad",
-      "tienda": "Nombre comercial",
-      "descripcion": "Resumen de lo comprado"
+      "tienda": "Tienda",
+      "descripcion": "Resumen"
     }`;
 
-    // Usamos el modelo más nuevo: gemini-2.0-flash
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    // Volvemos a gemini-1.5-flash para mayor estabilidad de cuota
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
@@ -41,15 +40,17 @@ export async function POST(req: Request) {
             { inlineData: { mimeType: file.type, data: base64Data } }
           ]
         }],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
+        generationConfig: { responseMimeType: "application/json" }
       })
     });
 
     const result = await response.json();
 
     if (!response.ok) {
+      // Si el error es 429, enviamos un mensaje amigable
+      if (response.status === 429) {
+        return NextResponse.json({ error: "Límite de Google alcanzado. Espera 60 segundos y vuelve a intentar." }, { status: 429 });
+      }
       return NextResponse.json({ error: result.error?.message || "Error en Google API" }, { status: response.status });
     }
 
