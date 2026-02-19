@@ -3,18 +3,21 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Falta API KEY" }, { status: 500 });
+    
+    if (!apiKey || apiKey.length < 10) {
+      return NextResponse.json({ error: "La API KEY no está configurada o es demasiado corta." }, { status: 500 });
+    }
 
     const formData = await req.formData();
     const file = formData.get("file") as File;
-    if (!file) return NextResponse.json({ error: "No hay archivo" }, { status: 400 });
+    if (!file) return NextResponse.json({ error: "No se recibió archivo" }, { status: 400 });
 
     const buffer = await file.arrayBuffer();
     const base64Data = Buffer.from(buffer).toString("base64");
 
-    const prompt = `Extrae los datos de esta factura/albarán. Responde ÚNICAMENTE con JSON puro:
+    const prompt = `Extrae datos de la imagen y responde SOLO JSON:
     {
-      "tipo": "Factura" | "Albarán",
+      "tipo": "Factura" o "Albarán",
       "empresa": "Nombre",
       "fecha": "DD/MM/YYYY",
       "numFactura": "Número",
@@ -26,40 +29,42 @@ export async function POST(req: Request) {
       "descripcion": "Resumen"
     }`;
 
-    // USAMOS GEMINI 2.0 FLASH EXPERIMENTAL (El más nuevo)
-    // Si este falla, cambia el modelo a: gemini-1.5-flash-002
-    const modelName = "gemini-2.0-flash-exp"; 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    // MODELO "8B": Es el que tiene mayor disponibilidad global y menos restricciones.
+    const model = "gemini-1.5-flash-8b";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType: file.type, data: base64Data } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json"
-        }
+          parts: [{ text: prompt }, { inlineData: { mimeType: file.type || "image/jpeg", data: base64Data } }]
+        }]
       })
     });
 
     const result = await response.json();
 
     if (!response.ok) {
+      // ESTO TE DIRÁ EL ERROR REAL
+      console.error("DEBUG GOOGLE:", JSON.stringify(result));
       return NextResponse.json({ 
-        error: `Google API (${modelName}): ${result.error?.message || "No encontrado"}` 
+        error: `Error de Google: ${result.error?.message || "Error desconocido"}`,
+        reason: result.error?.status || "Sin estado"
       }, { status: response.status });
     }
 
-    const text = result.candidates[0].content.parts[0].text;
-    return NextResponse.json(JSON.parse(text));
+    if (result.candidates && result.candidates[0].content.parts[0].text) {
+      let text = result.candidates[0].content.parts[0].text;
+      const start = text.indexOf('{');
+      const end = text.lastIndexOf('}');
+      const json = JSON.parse(text.substring(start, end + 1));
+      return NextResponse.json(json);
+    }
+
+    return NextResponse.json({ error: "La IA no devolvió texto" }, { status: 500 });
 
   } catch (err: any) {
-    return NextResponse.json({ error: "Error: " + err.message }, { status: 500 });
+    return NextResponse.json({ error: "Fallo crítico: " + err.message }, { status: 500 });
   }
 }
