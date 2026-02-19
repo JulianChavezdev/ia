@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Falta API KEY en Vercel" }, { status: 500 });
+    if (!apiKey) return NextResponse.json({ error: "Falta API KEY" }, { status: 500 });
 
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -12,67 +12,49 @@ export async function POST(req: Request) {
     const buffer = await file.arrayBuffer();
     const base64Data = Buffer.from(buffer).toString("base64");
 
-    const prompt = `Analiza esta imagen. Extrae los datos y clasifica como 'Factura' o 'Albarán'.
-    Responde ÚNICAMENTE con un JSON puro con esta estructura:
+    // PROMPT OPTIMIZADO PARA GEMINI 2.0 FLASH
+    const prompt = `Analiza detalladamente esta imagen. Clasifica como 'Factura' o 'Albarán'.
+    Extrae los datos y responde ÚNICAMENTE con un JSON puro con este formato:
     {
       "tipo": "Factura",
-      "empresa": "Nombre",
+      "empresa": "Nombre legal",
       "fecha": "DD/MM/YYYY",
-      "numFactura": "Número",
-      "importe": 0.0,
-      "iva21": 0.0,
-      "irpf19": 0.0,
+      "numFactura": "Número de documento",
+      "importe": 0.00,
+      "iva21": 0.00,
+      "irpf19": 0.00,
       "ciudad": "Ciudad",
-      "tienda": "Tienda",
-      "descripcion": "Resumen"
+      "tienda": "Nombre comercial",
+      "descripcion": "Resumen de lo comprado"
     }`;
 
-    // CAMBIO CLAVE: Usamos v1beta y el modelo gemini-1.5-flash
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // Usamos el modelo más nuevo: gemini-2.0-flash
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inline_data: {
-                  mime_type: file.type || "image/jpeg",
-                  data: base64Data
-                }
-              }
-            ]
-          }
-        ]
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: file.type, data: base64Data } }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
       })
     });
 
     const result = await response.json();
 
     if (!response.ok) {
-      // Si falla, intentamos dar un mensaje muy claro
-      return NextResponse.json({ 
-        error: `Google dice: ${result.error?.message || "Error desconocido"}` 
-      }, { status: response.status });
+      return NextResponse.json({ error: result.error?.message || "Error en Google API" }, { status: response.status });
     }
 
-    if (result.candidates && result.candidates[0].content.parts[0].text) {
-      let text = result.candidates[0].content.parts[0].text;
-      
-      // Limpiar el texto para obtener solo el JSON
-      const start = text.indexOf('{');
-      const end = text.lastIndexOf('}');
-      if (start !== -1 && end !== -1) {
-        text = text.substring(start, end + 1);
-      }
-
-      return NextResponse.json(JSON.parse(text));
-    } else {
-      return NextResponse.json({ error: "La IA no pudo leer la imagen correctamente" }, { status: 500 });
-    }
+    const text = result.candidates[0].content.parts[0].text;
+    return NextResponse.json(JSON.parse(text));
 
   } catch (err: any) {
     return NextResponse.json({ error: "Error interno: " + err.message }, { status: 500 });
