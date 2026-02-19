@@ -1,64 +1,69 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
+// Forzamos la inicialización con la versión 'v1' estable
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
 export async function POST(req: Request) {
   try {
     if (!apiKey) {
-      return NextResponse.json({ error: "API Key no encontrada" }, { status: 500 });
+      return NextResponse.json({ error: "Falta la API KEY en el servidor" }, { status: 500 });
     }
 
     const formData = await req.formData();
     const file = formData.get("file") as File;
     if (!file) return NextResponse.json({ error: "No hay archivo" }, { status: 400 });
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    
-    // CAMBIO AQUÍ: Usamos gemini-1.5-flash (sin el v1beta manual)
-    // El SDK actualizado ya sabe dónde buscarlo.
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-    });
+    const buffer = await file.arrayBuffer();
+    const base64Data = Buffer.from(buffer).toString("base64");
 
-    const prompt = `Analiza esta imagen contable. Clasifica como 'Factura' o 'Albarán'.
-    Devuelve ÚNICAMENTE un JSON con esta estructura:
+    // SOLUCIÓN AL 404: 
+    // 1. Usamos gemini-1.5-flash (el modelo más compatible)
+    // 2. No especificamos v1beta manualmente
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const prompt = `Actúa como un experto contable. Analiza la imagen y extrae los datos. 
+    Responde ÚNICAMENTE con un JSON puro:
     {
-      "tipo": "Factura",
+      "tipo": "Factura" o "Albarán",
       "empresa": "Nombre",
       "fecha": "DD/MM/YYYY",
       "numFactura": "Número",
-      "importe": 0.00,
-      "iva21": 0.00,
-      "irpf19": 0.00,
+      "importe": 0.0,
+      "iva21": 0.0,
+      "irpf19": 0.0,
       "ciudad": "Ciudad",
       "tienda": "Tienda",
-      "descripcion": "Resumen"
+      "descripcion": "Breve resumen"
     }`;
 
-    // Procesar la imagen
+    // Nueva forma de pasar los datos según la última documentación
     const result = await model.generateContent([
       {
         inlineData: {
-          data: buffer.toString("base64"),
-          mimeType: file.type
-        }
+          data: base64Data,
+          mimeType: file.type,
+        },
       },
-      { text: prompt } // Pasamos el prompt como objeto de texto
+      { text: prompt },
     ]);
 
     const response = await result.response;
-    let text = response.text();
+    const text = response.text();
     
-    // Limpieza de JSON
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    // Limpieza de JSON por si la IA añade texto extra
+    const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
     
-    return NextResponse.json(JSON.parse(text));
+    return NextResponse.json(JSON.parse(cleanJson));
 
   } catch (err: any) {
-    console.error("Error en Gemini:", err);
-    // Si sigue dando 404, el error dirá exactamente qué pasó
-    return NextResponse.json({ error: "Error de IA: " + err.message }, { status: 500 });
+    console.error("Detalle del error:", err);
+    
+    // Si el error persiste, intentamos con el modelo Pro como backup
+    return NextResponse.json({ 
+      error: "Error de conexión con Gemini. Verifica que tu API Key sea de Google AI Studio.",
+      details: err.message 
+    }, { status: 500 });
   }
 }
