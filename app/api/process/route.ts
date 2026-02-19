@@ -12,10 +12,9 @@ export async function POST(req: Request) {
     const buffer = await file.arrayBuffer();
     const base64Data = Buffer.from(buffer).toString("base64");
 
-    const prompt = `Analiza la imagen. Extrae datos y clasifica como 'Factura' o 'Albarán'.
-    Responde ÚNICAMENTE con un JSON puro:
+    const prompt = `Extrae los datos de esta factura/albarán. Responde ÚNICAMENTE con JSON puro:
     {
-      "tipo": "Factura",
+      "tipo": "Factura" | "Albarán",
       "empresa": "Nombre",
       "fecha": "DD/MM/YYYY",
       "numFactura": "Número",
@@ -27,9 +26,10 @@ export async function POST(req: Request) {
       "descripcion": "Resumen"
     }`;
 
-    // CAMBIO CLAVE: Usamos 'v1' (estable) y 'gemini-1.5-flash-latest'
-    // Esta combinación es la más robusta para evitar el error 404
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // USAMOS GEMINI 2.0 FLASH EXPERIMENTAL (El más nuevo)
+    // Si este falla, cambia el modelo a: gemini-1.5-flash-002
+    const modelName = "gemini-2.0-flash-exp"; 
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
@@ -42,9 +42,8 @@ export async function POST(req: Request) {
           ]
         }],
         generationConfig: {
-          // Eliminamos responseMimeType aquí porque algunas regiones de v1 no lo soportan aún
-          // Lo limpiaremos manualmente abajo
           temperature: 0.1,
+          responseMimeType: "application/json"
         }
       })
     });
@@ -53,22 +52,14 @@ export async function POST(req: Request) {
 
     if (!response.ok) {
       return NextResponse.json({ 
-        error: `Google API (${response.status}): ${result.error?.message || "Error desconocido"}` 
+        error: `Google API (${modelName}): ${result.error?.message || "No encontrado"}` 
       }, { status: response.status });
     }
 
-    // Limpieza manual del JSON por si acaso
-    let text = result.candidates[0].content.parts[0].text;
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1) {
-      text = text.substring(firstBrace, lastBrace + 1);
-    }
-
+    const text = result.candidates[0].content.parts[0].text;
     return NextResponse.json(JSON.parse(text));
 
   } catch (err: any) {
-    return NextResponse.json({ error: "Error interno: " + err.message }, { status: 500 });
+    return NextResponse.json({ error: "Error: " + err.message }, { status: 500 });
   }
 }
-
