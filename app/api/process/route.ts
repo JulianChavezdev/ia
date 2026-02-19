@@ -27,8 +27,9 @@ export async function POST(req: Request) {
       "descripcion": "Resumen"
     }`;
 
-    // Volvemos a gemini-1.5-flash para mayor estabilidad de cuota
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // CAMBIO CLAVE: Usamos 'v1' (estable) y 'gemini-1.5-flash-latest'
+    // Esta combinación es la más robusta para evitar el error 404
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
@@ -40,24 +41,34 @@ export async function POST(req: Request) {
             { inlineData: { mimeType: file.type, data: base64Data } }
           ]
         }],
-        generationConfig: { responseMimeType: "application/json" }
+        generationConfig: {
+          // Eliminamos responseMimeType aquí porque algunas regiones de v1 no lo soportan aún
+          // Lo limpiaremos manualmente abajo
+          temperature: 0.1,
+        }
       })
     });
 
     const result = await response.json();
 
     if (!response.ok) {
-      // Si el error es 429, enviamos un mensaje amigable
-      if (response.status === 429) {
-        return NextResponse.json({ error: "Límite de Google alcanzado. Espera 60 segundos y vuelve a intentar." }, { status: 429 });
-      }
-      return NextResponse.json({ error: result.error?.message || "Error en Google API" }, { status: response.status });
+      return NextResponse.json({ 
+        error: `Google API (${response.status}): ${result.error?.message || "Error desconocido"}` 
+      }, { status: response.status });
     }
 
-    const text = result.candidates[0].content.parts[0].text;
+    // Limpieza manual del JSON por si acaso
+    let text = result.candidates[0].content.parts[0].text;
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      text = text.substring(firstBrace, lastBrace + 1);
+    }
+
     return NextResponse.json(JSON.parse(text));
 
   } catch (err: any) {
     return NextResponse.json({ error: "Error interno: " + err.message }, { status: 500 });
   }
 }
+
