@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const base64Data = Buffer.from(buffer).toString("base64");
 
     const prompt = `Analiza esta imagen y extrae los datos. Clasifica como 'Factura' o 'Albarán'.
-    Responde ÚNICAMENTE con un JSON puro, sin markdown:
+    Responde ÚNICAMENTE con un JSON puro con esta estructura:
     {
       "tipo": "Factura",
       "empresa": "Nombre",
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
       "descripcion": "Resumen"
     }`;
 
-    // Llamada directa a la API de Google (Versión Estable v1)
+    // LLAMADA CORREGIDA: Usando camelCase (responseMimeType, inlineData, mimeType)
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
@@ -41,8 +41,8 @@ export async function POST(req: Request) {
               parts: [
                 { text: prompt },
                 {
-                  inline_data: {
-                    mime_type: file.type,
+                  inlineData: {
+                    mimeType: file.type,
                     data: base64Data,
                   },
                 },
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
             },
           ],
           generationConfig: {
-            response_mime_type: "application/json", // Forzamos respuesta JSON
+            responseMimeType: "application/json",
           },
         }),
       }
@@ -59,16 +59,18 @@ export async function POST(req: Request) {
     const result = await response.json();
 
     if (!response.ok) {
-      console.error("Error de Google:", result);
       return NextResponse.json({ 
-        error: `Google API Error: ${result.error?.message || "Error desconocido"}`,
-        code: response.status 
+        error: `Error de Google: ${result.error?.message || "Error desconocido"}`
       }, { status: response.status });
     }
 
-    // Extraer el texto del JSON que devuelve Google
-    const textContent = result.candidates[0].content.parts[0].text;
-    return NextResponse.json(JSON.parse(textContent));
+    // Extraer el texto de la respuesta
+    if (result.candidates && result.candidates[0].content.parts[0].text) {
+      const textContent = result.candidates[0].content.parts[0].text;
+      return NextResponse.json(JSON.parse(textContent));
+    } else {
+      throw new Error("La IA no devolvió datos válidos");
+    }
 
   } catch (err: any) {
     console.error("Error crítico:", err);
