@@ -12,23 +12,42 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = `Analiza esta imagen. Extrae los datos y clasifica como 'Factura' o 'Albarán'.
-    Devuelve ÚNICAMENTE un JSON:
+    const prompt = `Analiza esta imagen de factura o albarán. 
+    Extrae los datos y clasifica. Devuelve ÚNICAMENTE un objeto JSON puro, sin bloques de código markdown, con esta estructura exacta:
     {
       "tipo": "Factura" o "Albarán",
-      "empresa": "Nombre", "fecha": "DD/MM/YYYY", "numFactura": "Número",
-      "importe": 0.00, "iva21": 0.00, "irpf19": 0.00,
-      "ciudad": "Ciudad", "tienda": "Tienda", "descripcion": "Resumen"
-    }`;
+      "empresa": "string",
+      "fecha": "string (DD/MM/YYYY)",
+      "numFactura": "string",
+      "importe": number (total con decimales),
+      "iva21": number (cuota de iva),
+      "irpf19": number (cuota de irpf),
+      "ciudad": "string",
+      "tienda": "string",
+      "descripcion": "string"
+    }
+    Si un campo no existe o no se ve, pon null o 0 para números. No inventes datos.`;
 
     const result = await model.generateContent([
       prompt,
       { inlineData: { data: buffer.toString("base64"), mimeType: file.type } }
     ]);
 
-    const text = result.response.text().replace(/```json/g, "").replace(/```/g, "").trim();
-    return NextResponse.json(JSON.parse(text));
-  } catch (err) {
-    return NextResponse.json({ error: "Error" }, { status: 500 });
+    let text = result.response.text();
+    
+    // LIMPIEZA EXTREMA: Eliminar markdown si la IA lo incluyó
+    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    
+    try {
+      const jsonData = JSON.parse(text);
+      return NextResponse.json(jsonData);
+    } catch (parseError) {
+      console.error("Error parseando JSON de Gemini:", text);
+      return NextResponse.json({ error: "La IA no devolvió un formato válido", raw: text }, { status: 500 });
+    }
+
+  } catch (err: any) {
+    console.error("Error en API:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
