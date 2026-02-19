@@ -1,9 +1,10 @@
 "use client";
 import React, { useState } from "react";
 import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 import { 
   Upload, Loader2, Receipt, FileText, Trash2, 
-  Download, FileUp, Database, CheckCircle2, AlertCircle, Menu
+  Database, FileUp, AlertCircle, TrendingUp
 } from "lucide-react";
 
 export default function App() {
@@ -12,23 +13,28 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
 
   const onUpload = async (e: any) => {
+    e.preventDefault();
     const files = e.target.files || e.dataTransfer.files;
-    if (!files) return;
-    setLoading(true);
+    if (!files || files.length === 0) return;
     
+    setLoading(true);
     for (const file of Array.from(files) as File[]) {
       const fd = new FormData();
       fd.append("file", file);
       try {
         const res = await fetch("/api/process", { method: "POST", body: fd });
         const data = await res.json();
-        if (!data.error) setItems(prev => [data, ...prev]);
-      } catch (err) { console.error(err); }
+        if (!data.error) {
+          setItems(prev => [data, ...prev]);
+        }
+      } catch (err) {
+        console.error("Error subiendo archivo:", err);
+      }
     }
     setLoading(false);
   };
 
-  const exportExcel = async (tipo: string) => {
+  const exportPrettyExcel = async (tipo: string) => {
     const filtered = items.filter(i => i.tipo === tipo);
     if (filtered.length === 0) return;
 
@@ -50,53 +56,53 @@ export default function App() {
     const headerRow = worksheet.getRow(1);
     headerRow.eachCell((cell) => {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD700' } };
-      cell.font = { bold: true };
+      cell.font = { bold: true, size: 12 };
       cell.alignment = { horizontal: 'center' };
+      cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
     });
 
     filtered.forEach(item => {
       const row = worksheet.addRow(item);
       row.getCell('importe').numFmt = '#,##0.00€';
+      row.getCell('iva21').numFmt = '#,##0.00€';
+      row.getCell('irpf19').numFmt = '#,##0.00€';
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${tipo}s_${new Date().toLocaleDateString()}.xlsx`;
-    a.click();
+    saveAs(new Blob([buffer]), `${tipo}s_${new Date().toLocaleDateString()}.xlsx`);
   };
 
+  const totalImporte = items.reduce((acc, curr) => acc + (Number(curr.importe) || 0), 0);
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans pb-20">
-      {/* HEADER DINÁMICO */}
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 pb-10">
+      {/* NAVEGACIÓN */}
       <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200 px-4 py-3">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <div className="bg-yellow-400 p-2 rounded-lg">
+            <div className="bg-yellow-400 p-2 rounded-xl shadow-inner">
               <Database size={20} className="text-slate-900" />
             </div>
-            <h1 className="font-bold text-lg tracking-tight hidden sm:block">SCANNER <span className="text-yellow-500 text-xs">AI</span></h1>
+            <h1 className="font-black text-xl tracking-tighter hidden sm:block">SCANNER<span className="text-yellow-500">PRO</span></h1>
           </div>
           
           <div className="flex gap-2">
             <button 
-              onClick={() => exportExcel("Factura")}
+              onClick={() => exportPrettyExcel("Factura")}
               disabled={!items.some(i => i.tipo === "Factura")}
-              className="flex items-center gap-2 bg-slate-900 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-slate-800 disabled:opacity-30 transition-all shadow-sm"
+              className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-800 disabled:opacity-30 transition-all shadow-lg"
             >
               <Receipt size={14}/> <span className="hidden md:inline">FACTURAS</span>
             </button>
             <button 
-              onClick={() => exportExcel("Albarán")}
+              onClick={() => exportPrettyExcel("Albarán")}
               disabled={!items.some(i => i.tipo === "Albarán")}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 disabled:opacity-30 transition-all shadow-sm"
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 disabled:opacity-30 transition-all shadow-lg"
             >
               <FileText size={14}/> <span className="hidden md:inline">ALBARANES</span>
             </button>
             {items.length > 0 && (
-              <button onClick={() => setItems([])} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition">
+              <button onClick={() => setItems([])} className="ml-2 p-2 text-red-500 hover:bg-red-50 rounded-full transition">
                 <Trash2 size={20}/>
               </button>
             )}
@@ -105,35 +111,30 @@ export default function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 mt-8">
-        {/* DASHBOARD SIMPLE */}
+        {/* RESUMEN DASHBOARD */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Total Procesado</p>
-            <p className="text-2xl font-black">{items.length}</p>
-          </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Facturas</p>
-            <p className="text-2xl font-black text-yellow-600">{items.filter(i => i.tipo === "Factura").length}</p>
-          </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Albaranes</p>
-            <p className="text-2xl font-black text-indigo-600">{items.filter(i => i.tipo === "Albarán").length}</p>
-          </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Total Importe</p>
-            <p className="text-2xl font-black">€{items.reduce((acc, curr) => acc + (curr.importe || 0), 0).toFixed(0)}</p>
-          </div>
+          {[
+            { label: "Procesados", val: items.length, color: "text-slate-900" },
+            { label: "Facturas", val: items.filter(i => i.tipo === "Factura").length, color: "text-yellow-600" },
+            { label: "Albaranes", val: items.filter(i => i.tipo === "Albarán").length, color: "text-indigo-600" },
+            { label: "Total €", val: `€${totalImporte.toLocaleString()}`, color: "text-green-600" }
+          ].map((stat, i) => (
+            <div key={i} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">{stat.label}</p>
+              <p className={`text-2xl font-black ${stat.color}`}>{stat.val}</p>
+            </div>
+          ))}
         </div>
 
-        {/* DROPZONE MEJORADA */}
+        {/* CARGADOR DE ARCHIVOS */}
         <div 
           onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={(e) => { e.preventDefault(); setDragActive(false); onUpload(e); }}
           className={`
-            relative group mb-8 flex flex-col items-center justify-center w-full h-48 
-            border-2 border-dashed rounded-3xl transition-all duration-300
-            ${dragActive ? 'border-yellow-400 bg-yellow-50 scale-[1.01]' : 'border-slate-300 bg-white hover:border-indigo-400'}
+            relative mb-8 flex flex-col items-center justify-center w-full h-52 
+            border-2 border-dashed rounded-[2.5rem] transition-all duration-500
+            ${dragActive ? 'border-yellow-400 bg-yellow-50 scale-[1.02]' : 'border-slate-300 bg-white hover:border-indigo-400 shadow-sm'}
           `}
         >
           <input 
@@ -143,67 +144,63 @@ export default function App() {
             disabled={loading}
           />
           
-          <div className="flex flex-col items-center pointer-events-none">
-            <div className={`p-4 rounded-full mb-3 transition-colors ${loading ? 'bg-yellow-100' : 'bg-slate-100 group-hover:bg-indigo-100'}`}>
+          <div className="flex flex-col items-center pointer-events-none px-6 text-center">
+            <div className={`p-5 rounded-full mb-4 transition-transform duration-500 ${loading ? 'bg-yellow-100 animate-pulse scale-110' : 'bg-slate-50'}`}>
               {loading ? (
-                <Loader2 className="h-8 w-8 text-yellow-600 animate-spin" />
+                <Loader2 className="h-10 w-10 text-yellow-600 animate-spin" />
               ) : (
-                <FileUp className="h-8 w-8 text-slate-500 group-hover:text-indigo-600" />
+                <FileUp className="h-10 w-10 text-slate-400" />
               )}
             </div>
-            <p className="text-sm font-bold text-slate-700">
-              {loading ? "INTELIGENCIA ARTIFICIAL PROCESANDO..." : "TOCA PARA SUBIR O ARRASTRA ARCHIVOS"}
+            <p className="text-sm font-black text-slate-700 uppercase tracking-tight">
+              {loading ? "Analizando documentos con IA..." : "Toca o arrastra tus Facturas/PDF"}
             </p>
-            <p className="text-xs text-slate-400 mt-1 uppercase tracking-tighter">Soporta Imágenes y PDF</p>
+            <p className="text-xs text-slate-400 mt-2 font-medium">Soporta múltiples archivos JPG, PNG y PDF</p>
           </div>
         </div>
 
-        {/* TABLA RESPONSIVA TIPO EXCEL PRO */}
-        <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden">
+        {/* TABLA DE RESULTADOS */}
+        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/60 border border-slate-200 overflow-hidden mb-10">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm border-collapse">
               <thead>
-                <tr className="bg-[#FFD700] text-slate-900 uppercase font-black text-[10px] tracking-widest border-b border-slate-300">
-                  <th className="px-6 py-4 border-r border-slate-300/30">Empresa</th>
-                  <th className="px-6 py-4 border-r border-slate-300/30">Fecha</th>
-                  <th className="px-6 py-4 border-r border-slate-300/30">Nº Doc</th>
-                  <th className="px-6 py-4 border-r border-slate-300/30 text-right">Importe</th>
-                  <th className="px-6 py-4 border-r border-slate-300/30 text-right">IVA 21%</th>
-                  <th className="px-6 py-4 border-r border-slate-300/30">Tipo</th>
-                  <th className="px-6 py-4">Descripción</th>
+                <tr className="bg-[#FFD700] text-slate-900 uppercase font-black text-[10px] tracking-[0.2em] border-b-2 border-slate-300">
+                  <th className="px-6 py-5 border-r border-slate-300/30">Empresa</th>
+                  <th className="px-6 py-5 border-r border-slate-300/30">Fecha</th>
+                  <th className="px-6 py-5 border-r border-slate-300/30">Nº Documento</th>
+                  <th className="px-6 py-5 border-r border-slate-300/30 text-right">Importe</th>
+                  <th className="px-6 py-5 border-r border-slate-300/30">Tipo</th>
+                  <th className="px-6 py-5">Descripción</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 italic">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-24 text-center">
-                      <div className="flex flex-col items-center opacity-20">
-                        <AlertCircle size={48} />
-                        <p className="mt-2 font-bold uppercase tracking-widest">Sin documentos procesados</p>
+                    <td colSpan={6} className="px-6 py-32 text-center">
+                      <div className="flex flex-col items-center text-slate-300">
+                        <AlertCircle size={40} className="mb-3 opacity-20" />
+                        <p className="font-black uppercase tracking-widest text-xs opacity-40">Bandeja de entrada vacía</p>
                       </div>
                     </td>
                   </tr>
                 ) : (
                   items.map((item, idx) => (
-                    <tr key={idx} className="group hover:bg-slate-50/80 transition-colors">
-                      <td className="px-6 py-4 border-r border-slate-100 font-bold text-slate-800">{item.empresa || '-'}</td>
-                      <td className="px-6 py-4 border-r border-slate-100 whitespace-nowrap">{item.fecha || '-'}</td>
-                      <td className="px-6 py-4 border-r border-slate-100 font-mono text-xs">{item.numFactura || '-'}</td>
-                      <td className="px-6 py-4 border-r border-slate-100 text-right font-black">
-                        {item.importe ? `€${item.importe.toLocaleString()}` : '-'}
-                      </td>
-                      <td className="px-6 py-4 border-r border-slate-100 text-right text-slate-500">
-                        {item.iva21 ? `€${item.iva21.toFixed(2)}` : '€0.00'}
+                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
+                      <td className="px-6 py-4 border-r border-slate-100 font-black text-slate-800">{item.empresa || '---'}</td>
+                      <td className="px-6 py-4 border-r border-slate-100 whitespace-nowrap font-medium text-slate-500">{item.fecha || '---'}</td>
+                      <td className="px-6 py-4 border-r border-slate-100 font-mono text-xs font-bold text-indigo-600">{item.numFactura || '---'}</td>
+                      <td className="px-6 py-4 border-r border-slate-100 text-right font-black text-slate-900">
+                        {item.importe ? `€${Number(item.importe).toFixed(2)}` : '€0.00'}
                       </td>
                       <td className="px-6 py-4 border-r border-slate-100">
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${
+                        <span className={`px-3 py-1 rounded-full text-[9px] font-black tracking-tighter ${
                           item.tipo === 'Factura' ? 'bg-yellow-100 text-yellow-700' : 'bg-indigo-100 text-indigo-700'
                         }`}>
                           {item.tipo}
                         </span>
                       </td>
-                      <td className="px-6 py-4 truncate max-w-[200px] text-slate-500 italic text-xs">
-                        {item.descripcion || 'Sin descripción'}
+                      <td className="px-6 py-4 text-xs text-slate-400 truncate max-w-[250px]">
+                        {item.descripcion || 'Sin detalles extraídos'}
                       </td>
                     </tr>
                   ))
@@ -212,7 +209,7 @@ export default function App() {
             </table>
           </div>
         </div>
-      </tbody>
+      </main>
     </div>
   );
 }
