@@ -1,53 +1,42 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || "");
+// Usamos la variable sin el prefijo NEXT_PUBLIC para mayor seguridad en el servidor
+const apiKey = process.env.GEMINI_API_KEY;
+const genAI = new GoogleGenerativeAI(apiKey || "");
 
 export async function POST(req: Request) {
   try {
+    // Verificación de seguridad rápida
+    if (!apiKey || apiKey === "") {
+      return NextResponse.json({ error: "API Key no configurada en el servidor" }, { status: 500 });
+    }
+
     const formData = await req.formData();
     const file = formData.get("file") as File;
-    if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
+    if (!file) return NextResponse.json({ error: "No hay archivo" }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = `Analiza esta imagen de factura o albarán. 
-    Extrae los datos y clasifica. Devuelve ÚNICAMENTE un objeto JSON puro, sin bloques de código markdown, con esta estructura exacta:
+    const prompt = `Analiza esta imagen. Extrae los datos y clasifica como 'Factura' o 'Albarán'.
+    Devuelve ÚNICAMENTE un JSON:
     {
-      "tipo": "Factura" o "Albarán",
-      "empresa": "string",
-      "fecha": "string (DD/MM/YYYY)",
-      "numFactura": "string",
-      "importe": number (total con decimales),
-      "iva21": number (cuota de iva),
-      "irpf19": number (cuota de irpf),
-      "ciudad": "string",
-      "tienda": "string",
-      "descripcion": "string"
-    }
-    Si un campo no existe o no se ve, pon null o 0 para números. No inventes datos.`;
+      "tipo": "Factura" | "Albarán",
+      "empresa": "Nombre", "fecha": "DD/MM/YYYY", "numFactura": "Número",
+      "importe": 0.00, "iva21": 0.00, "irpf19": 0.00,
+      "ciudad": "string", "tienda": "string", "descripcion": "string"
+    }`;
 
     const result = await model.generateContent([
       prompt,
       { inlineData: { data: buffer.toString("base64"), mimeType: file.type } }
     ]);
 
-    let text = result.response.text();
-    
-    // LIMPIEZA EXTREMA: Eliminar markdown si la IA lo incluyó
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    
-    try {
-      const jsonData = JSON.parse(text);
-      return NextResponse.json(jsonData);
-    } catch (parseError) {
-      console.error("Error parseando JSON de Gemini:", text);
-      return NextResponse.json({ error: "La IA no devolvió un formato válido", raw: text }, { status: 500 });
-    }
-
+    const text = result.response.text().replace(/```json/g, "").replace(/```/g, "").trim();
+    return NextResponse.json(JSON.parse(text));
   } catch (err: any) {
-    console.error("Error en API:", err);
+    console.error("Error detallado:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
