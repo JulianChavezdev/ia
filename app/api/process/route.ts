@@ -2,22 +2,38 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    
-    if (!apiKey || apiKey.length < 10) {
-      return NextResponse.json({ error: "La API KEY no está configurada o es demasiado corta." }, { status: 500 });
+    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    if (!apiKey) return NextResponse.json({ error: "Falta API KEY" }, { status: 500 });
+
+    // 1. PRIMERO: Vamos a pedirle a Google que nos diga qué modelos puedes usar
+    const listUrl = `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`;
+    const listRes = await fetch(listUrl);
+    const listData = await listRes.json();
+
+    if (!listRes.ok) {
+      return NextResponse.json({ 
+        error: "Tu API Key no funciona o la API no está habilitada.",
+        details: listData.error?.message 
+      }, { status: 401 });
     }
 
+    // 2. BUSCAR EL MEJOR MODELO DISPONIBLE
+    // Buscamos gemini-1.5-flash o cualquier gemini en tu lista
+    const availableModels = listData.models.map((m: any) => m.name.replace("models/", ""));
+    const modelToUse = availableModels.find((m: string) => m.includes("gemini-1.5-flash")) || availableModels[0];
+
+    console.log("Modelos disponibles:", availableModels);
+    console.log("Usando modelo:", modelToUse);
+
+    // 3. PROCESAR LA IMAGEN
     const formData = await req.formData();
     const file = formData.get("file") as File;
-    if (!file) return NextResponse.json({ error: "No se recibió archivo" }, { status: 400 });
-
     const buffer = await file.arrayBuffer();
     const base64Data = Buffer.from(buffer).toString("base64");
 
-    const prompt = `Extrae datos de la imagen y responde SOLO JSON:
+    const prompt = `Analiza esta imagen y devuelve SOLO un JSON:
     {
-      "tipo": "Factura" o "Albarán",
+      "tipo": "Factura",
       "empresa": "Nombre",
       "fecha": "DD/MM/YYYY",
       "numFactura": "Número",
@@ -29,16 +45,17 @@ export async function POST(req: Request) {
       "descripcion": "Resumen"
     }`;
 
-    // MODELO "8B": Es el que tiene mayor disponibilidad global y menos restricciones.
-    const model = "gemini-1.5-flash-8b";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const genUrl = `https://generativelanguage.googleapis.com/v1/models/${modelToUse}:generateContent?key=${apiKey}`;
 
-    const response = await fetch(url, {
+    const response = await fetch(genUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{
-          parts: [{ text: prompt }, { inlineData: { mimeType: file.type || "image/jpeg", data: base64Data } }]
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: file.type || "image/jpeg", data: base64Data } }
+          ]
         }]
       })
     });
@@ -46,25 +63,18 @@ export async function POST(req: Request) {
     const result = await response.json();
 
     if (!response.ok) {
-      // ESTO TE DIRÁ EL ERROR REAL
-      console.error("DEBUG GOOGLE:", JSON.stringify(result));
       return NextResponse.json({ 
-        error: `Error de Google: ${result.error?.message || "Error desconocido"}`,
-        reason: result.error?.status || "Sin estado"
+        error: `Error al generar contenido con ${modelToUse}`,
+        details: result.error?.message 
       }, { status: response.status });
     }
 
-    if (result.candidates && result.candidates[0].content.parts[0].text) {
-      let text = result.candidates[0].content.parts[0].text;
-      const start = text.indexOf('{');
-      const end = text.lastIndexOf('}');
-      const json = JSON.parse(text.substring(start, end + 1));
-      return NextResponse.json(json);
-    }
-
-    return NextResponse.json({ error: "La IA no devolvió texto" }, { status: 500 });
+    const text = result.candidates[0].content.parts[0].text;
+    const cleanJson = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+    
+    return NextResponse.json(JSON.parse(cleanJson));
 
   } catch (err: any) {
-    return NextResponse.json({ error: "Fallo crítico: " + err.message }, { status: 500 });
+    return NextResponse.json({ error: "Fallo: " + err.message }, { status: 500 });
   }
 }
